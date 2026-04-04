@@ -1,0 +1,121 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# openenv.yaml — Smart Parking Lot Environment Metadata
+# Conforms to the OpenEnv 1.0 specification
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: smart-parking-env
+version: "1.0.0"
+description: >
+  A fully-observable, step-based parking lot simulation designed as an
+  agentic AI benchmark.  An LLM agent acts as a Parking Manager, deciding
+  whether to assign, reject, or wait for each arriving car.  Rewards are
+  shaped to encourage type-matched placements (EV → EV_CHARGING,
+  VIP → PREMIUM) and to penalise illegal or wasteful actions.
+
+author: "Smart Parking Team"
+license: MIT
+
+# ── interface ─────────────────────────────────────────────────────────────────
+interface:
+  step:   "env.openenv_api.ParkingEnv.step"
+  reset:  "env.openenv_api.ParkingEnv.reset"
+  state:  "env.openenv_api.ParkingEnv.state"
+  grade:  "env.openenv_api.ParkingEnv.grade"
+
+# ── observation space ─────────────────────────────────────────────────────────
+observation_space:
+  type: object
+  fields:
+    available_slots:
+      type: array
+      items:
+        id:          {type: string,  example: "A1"}
+        slot_type:   {type: string,  enum: [STANDARD, EV_CHARGING, PREMIUM]}
+        is_occupied: {type: boolean}
+        occupant_id: {type: integer, nullable: true}
+    incoming_queue:
+      type: array
+      items:
+        id:         {type: integer}
+        car_type:   {type: string, enum: [STANDARD, EV, VIP]}
+        entry_time: {type: integer}
+    current_time_step: {type: integer}
+    current_revenue:   {type: number, format: float}
+
+# ── action space ──────────────────────────────────────────────────────────────
+action_space:
+  type: object
+  fields:
+    action_type: {type: string, enum: [ASSIGN, REJECT, WAIT]}
+    car_id:      {type: integer, nullable: true}
+    slot_id:     {type: string,  nullable: true}
+
+# ── reward ────────────────────────────────────────────────────────────────────
+reward:
+  range: [-0.5, 1.7]   # per-step bounds (base + type-match bonus)
+  shaping:
+    park_any_car:        +0.2
+    type_match_bonus:    +0.5
+    reject_when_avail:   -0.1
+    illegal_move:        -0.5
+  terminal: "current_revenue / max_possible_revenue  (0.0 – 1.0)"
+
+# ── tasks ─────────────────────────────────────────────────────────────────────
+tasks:
+
+  - id: basic_park
+    display_name: "Basic Park"
+    difficulty: easy
+    description: >
+      An empty lot and 5 standard cars in the queue.
+      Park all 5 cars in valid slots to achieve a perfect score.
+    max_steps: 10
+    grader: deterministic
+    grader_description: >
+      Returns 1.0 iff all 5 cars are successfully parked and the queue
+      is empty at episode end; otherwise proportional to cars parked.
+
+  - id: ev_sort
+    display_name: "EV Sort"
+    difficulty: medium
+    description: >
+      Mixed queue of EV and Standard cars with a limited number of
+      EV_CHARGING slots.  The agent must route each car to its
+      matching slot type to score full marks.
+    max_steps: 20
+    grader: deterministic
+    grader_description: >
+      Returns 1.0 only if every EV car occupies an EV_CHARGING slot
+      and every Standard car occupies a STANDARD slot at episode end.
+      Partial credit is awarded proportionally.
+
+  - id: rush_hour
+    display_name: "Rush Hour"
+    difficulty: hard
+    description: >
+      The lot starts 90 % full.  A surge queue of VIP and Standard
+      cars arrives.  The agent must maximise revenue within 15 steps
+      using limited slots, including PREMIUM slots reserved for VIPs.
+    max_steps: 15
+    grader: continuous
+    grader_description: >
+      Continuous score = current_revenue / theoretical_max_revenue.
+      Rewards efficient use of premium slots and avoidance of illegal
+      moves under congested conditions.
+
+# ── runtime ───────────────────────────────────────────────────────────────────
+runtime:
+  python: "3.10"
+  entrypoint: "ui/app.py"
+  port: 7860
+  framework: gradio
+
+# ── tags ──────────────────────────────────────────────────────────────────────
+tags:
+  - parking
+  - simulation
+  - agentic-ai
+  - openenv
+  - llm-agent
+  - reward-shaping
+  - huggingface-spaces
