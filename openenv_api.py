@@ -41,6 +41,10 @@ class ParkingEnv:
         self._current_task: Optional[TaskConfig] = None
         self._grader: Optional[TaskGrader] = None
         self._episode_active: bool = False
+    
+    def grade(self):
+        """Alias for the OpenEnv validator."""
+        return self.summary()    
 
     # ------------------------------------------------------------------
     # reset()
