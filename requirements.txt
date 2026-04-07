@@ -2,3 +2,4 @@ gradio>=4.20.0
 pydantic>=2.5.0
 fastapi>=0.110.0
 openai
+uvicorn
