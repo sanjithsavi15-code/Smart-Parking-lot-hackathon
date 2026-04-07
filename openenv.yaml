@@ -106,7 +106,7 @@ tasks:
 # ── runtime ───────────────────────────────────────────────────────────────────
 runtime:
   python: "3.10"
-  entrypoint: "ui/app.py"
+  entrypoint: "server/app.py"
   port: 7860
   framework: gradio
 
