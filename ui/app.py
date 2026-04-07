@@ -1,6 +1,5 @@
 import gradio as gr
-from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, Request, HTTPException
 import uvicorn
 
 from env.openenv_api import ParkingEnv
@@ -8,27 +7,37 @@ from env.models import Action, ActionType
 from env.tasks import TASK_REGISTRY
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 1. FastAPI Backend (For the OpenEnv Automated Checker)
+# 1. FastAPI Backend (Bulletproofed against Bot requests)
 # ─────────────────────────────────────────────────────────────────────────────
 app = FastAPI(title="Smart Parking OpenEnv API")
-
-# Global instance for the automated API checker
 api_env = ParkingEnv()
 
-class ResetRequest(BaseModel):
-    task_id: str = "basic_park"
-
 @app.post("/reset")
-def api_reset(req: ResetRequest):
+async def api_reset(request: Request):
+    """Manual JSON parsing to prevent 422 runtime errors on empty bot requests."""
     try:
-        return api_env.reset(task_id=req.task_id)
+        data = await request.json()
+    except Exception:
+        data = {} # Catch empty/malformed bodies and default to empty dict
+    
+    # Safely get task_id, fallback to basic_park
+    task_id = data.get("task_id", "basic_park") if data else "basic_park"
+    
+    try:
+        return api_env.reset(task_id=task_id)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 @app.post("/step")
-def api_step(action: Action):
+async def api_step(request: Request):
     try:
-        return api_env.step(action)
+        data = await request.json()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Missing JSON payload")
+        
+    try:
+        act = Action(**data)
+        return api_env.step(act)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -54,53 +63,34 @@ def get_new_env():
     return ParkingEnv()
 
 def render_grid(obs):
-    if not obs:
-        return "<i>Press Reset to start a task.</i>"
-    
+    if not obs: return "<i>Press Reset to start a task.</i>"
     html = "<div style='display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px;'>"
     for slot in obs.available_slots:
         bg_color = "#2d3748" if not slot.is_occupied else "#742a2a"
         border_color = "#48bb78" if not slot.is_occupied else "#f56565"
         occ = f"🚗 Car {slot.occupant_id}" if slot.is_occupied else "✅ Empty"
-        
-        html += f"""
-        <div style='background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 8px; padding: 10px; text-align: center; color: white; font-family: sans-serif;'>
-            <div style='font-weight: bold; font-size: 1.1em;'>{slot.id}</div>
-            <div style='font-size: 0.8em; color: #a0aec0; margin-bottom: 5px;'>{slot.slot_type.value}</div>
-            <div style='font-size: 0.9em;'>{occ}</div>
-        </div>
-        """
+        html += f"<div style='background-color: {bg_color}; border: 2px solid {border_color}; border-radius: 8px; padding: 10px; text-align: center; color: white; font-family: sans-serif;'><div style='font-weight: bold; font-size: 1.1em;'>{slot.id}</div><div style='font-size: 0.8em; color: #a0aec0; margin-bottom: 5px;'>{slot.slot_type.value}</div><div style='font-size: 0.9em;'>{occ}</div></div>"
     html += "</div>"
     return html
 
 def render_queue(obs):
-    if not obs:
-        return "<i>No cars in queue.</i>"
-    if not obs.incoming_queue:
-        return "<div style='color: #48bb78; font-weight: bold;'>🎉 Queue is empty!</div>"
-        
+    if not obs: return "<i>No cars in queue.</i>"
+    if not obs.incoming_queue: return "<div style='color: #48bb78; font-weight: bold;'>🎉 Queue is empty!</div>"
     html = "<div style='display: flex; flex-direction: column; gap: 8px;'>"
     for car in obs.incoming_queue:
         icon = "⚡" if car.car_type.value == "EV" else "⭐" if car.car_type.value == "VIP" else "🚙"
-        html += f"""
-        <div style='background-color: #2b6cb0; padding: 8px 12px; border-radius: 6px; color: white;'>
-            <b>{icon} Car {car.id}</b> &mdash; {car.car_type.value} 
-            <span style='float: right; font-size: 0.8em; color: #e2e8f0;'>Arrived T={car.entry_time}</span>
-        </div>
-        """
+        html += f"<div style='background-color: #2b6cb0; padding: 8px 12px; border-radius: 6px; color: white;'><b>{icon} Car {car.id}</b> &mdash; {car.car_type.value} <span style='float: right; font-size: 0.8em; color: #e2e8f0;'>Arrived T={car.entry_time}</span></div>"
     html += "</div>"
     return html
 
 def update_dropdowns(obs):
-    if not obs:
-        return gr.update(choices=[], value=None), gr.update(choices=[], value=None)
+    if not obs: return gr.update(choices=[], value=None), gr.update(choices=[], value=None)
     car_choices = [(f"Car {c.id} ({c.car_type.value})", c.id) for c in obs.incoming_queue]
     slot_choices = [(f"{s.id} ({s.slot_type.value})", s.id) for s in obs.available_slots if not s.is_occupied]
     return gr.update(choices=car_choices, value=None), gr.update(choices=slot_choices, value=None)
 
 def reset_env(env, task_id):
-    if not env:
-        env = get_new_env()
+    if not env: env = get_new_env()
     obs = env.reset(task_id=task_id)
     grid = render_grid(obs)
     queue = render_queue(obs)
@@ -110,26 +100,17 @@ def reset_env(env, task_id):
     return env, grid, queue, car_u, slot_u, log
 
 def toggle_inputs(action_type):
-    if action_type == "ASSIGN":
-        return gr.update(interactive=True), gr.update(interactive=True)
-    elif action_type == "REJECT":
-        return gr.update(interactive=True), gr.update(interactive=False, value=None)
-    else: 
-        return gr.update(interactive=False, value=None), gr.update(interactive=False, value=None)
+    if action_type == "ASSIGN": return gr.update(interactive=True), gr.update(interactive=True)
+    elif action_type == "REJECT": return gr.update(interactive=True), gr.update(interactive=False, value=None)
+    else: return gr.update(interactive=False, value=None), gr.update(interactive=False, value=None)
 
 def execute_action(env, log_history, action_type, car_id, slot_id):
-    if env is None or env.task_id is None:
-        err = "<div style='color: #f56565;'><b>Error:</b> Please Reset/Load a task first!</div>"
-        return env, gr.update(), gr.update(), gr.update(), gr.update(), err + log_history
-        
-    if env.is_done:
-        msg = "<div style='color: #fbd38d;'><i>Episode is already finished! Please reset to play again.</i></div>"
-        return env, gr.update(), gr.update(), gr.update(), gr.update(), msg + log_history
+    if env is None or env.task_id is None: return env, gr.update(), gr.update(), gr.update(), gr.update(), "<div style='color: #f56565;'><b>Error:</b> Please Reset/Load a task first!</div>" + log_history
+    if env.is_done: return env, gr.update(), gr.update(), gr.update(), gr.update(), "<div style='color: #fbd38d;'><i>Episode is already finished! Please reset to play again.</i></div>" + log_history
 
     try:
         act_enum = ActionType(action_type)
-        if act_enum == ActionType.WAIT:
-            act = Action(action_type=act_enum, car_id=None, slot_id=None)
+        if act_enum == ActionType.WAIT: act = Action(action_type=act_enum, car_id=None, slot_id=None)
         elif act_enum == ActionType.REJECT:
             if car_id is None: raise ValueError("Must select a car to REJECT.")
             act = Action(action_type=act_enum, car_id=car_id, slot_id=None)
@@ -147,24 +128,17 @@ def execute_action(env, log_history, action_type, car_id, slot_id):
         reward_val = res.reward.value
         reward_color = "#48bb78" if reward_val > 0 else "#f56565" if reward_val < 0 else "#a0aec0"
         
-        entry = f"<div style='border-bottom: 1px solid #4a5568; padding: 5px 0;'>"
-        entry += f"<b>T={obs.current_time_step}</b> | Action: <b>{action_type}</b> "
-        if act_enum != ActionType.WAIT:
-            entry += f"[Car {car_id}" + (f" → Slot {slot_id}]" if slot_id else "]")
-        entry += f" | Reward: <span style='color: {reward_color}; font-weight: bold;'>{reward_val:.2f}</span>"
-        entry += f"<br><span style='font-size: 0.9em; color: #cbd5e0;'>{info_msg}</span></div>"
+        entry = f"<div style='border-bottom: 1px solid #4a5568; padding: 5px 0;'><b>T={obs.current_time_step}</b> | Action: <b>{action_type}</b> "
+        if act_enum != ActionType.WAIT: entry += f"[Car {car_id}" + (f" → Slot {slot_id}]" if slot_id else "]")
+        entry += f" | Reward: <span style='color: {reward_color}; font-weight: bold;'>{reward_val:.2f}</span><br><span style='font-size: 0.9em; color: #cbd5e0;'>{info_msg}</span></div>"
         
         if res.done:
             summary = env.summary()
-            entry = f"<div style='background-color: #276749; padding: 10px; border-radius: 5px; margin: 10px 0; color: white;'>" \
-                    f"<b>🎉 Episode Finished!</b><br>Final Score: <b>{summary.final_score:.2f} / 1.0</b><br>" \
-                    f"Total Revenue: ${summary.total_revenue:.2f}<br>" \
-                    f"Cars Parked: {summary.cars_parked} | Rejected: {summary.cars_rejected} | Invalid Actions: {summary.invalid_actions}</div>" + entry
+            entry = f"<div style='background-color: #276749; padding: 10px; border-radius: 5px; margin: 10px 0; color: white;'><b>🎉 Episode Finished!</b><br>Final Score: <b>{summary.final_score:.2f} / 1.0</b><br>Total Revenue: ${summary.total_revenue:.2f}<br>Cars Parked: {summary.cars_parked} | Rejected: {summary.cars_rejected} | Invalid Actions: {summary.invalid_actions}</div>" + entry
             
         return env, grid, queue, car_u, slot_u, entry + log_history
     except Exception as e:
-        err = f"<div style='color: #f56565; padding: 5px 0;'><b>Error:</b> {str(e)}</div>"
-        return env, gr.update(), gr.update(), gr.update(), gr.update(), err + log_history
+        return env, gr.update(), gr.update(), gr.update(), gr.update(), f"<div style='color: #f56565; padding: 5px 0;'><b>Error:</b> {str(e)}</div>" + log_history
 
 def execute_wait(env, log_history):
     return execute_action(env, log_history, "WAIT", None, None)
@@ -206,12 +180,8 @@ def build_app():
         
     return interface
 
-# Generate the Gradio App
 gradio_app = build_app()
-
-# Mount Gradio onto the FastAPI router 
 app = gr.mount_gradio_app(app, gradio_app, path="/")
 
 if __name__ == "__main__":
-    # Launch uvicorn to serve the API + Gradio simultaneously
     uvicorn.run(app, host="0.0.0.0", port=7860)
