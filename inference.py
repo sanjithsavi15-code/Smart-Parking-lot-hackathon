@@ -10,7 +10,7 @@ from env.openenv_api import ParkingEnv
 from env.models import Action, ActionType
 
 # --- Mandatory Environment Variables ---
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
+API_KEY = os.getenv("OPENAI_API_KEY") or os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 API_BASE_URL = os.getenv("API_BASE_URL") or "https://api.x.ai/v1"
 MODEL_NAME = os.getenv("MODEL_NAME") or "grok-beta"
 
