@@ -42,10 +42,13 @@ class ParkingEnv:
         self._grader: Optional[TaskGrader] = None
         self._episode_active: bool = False
         
-    def grade(self):
-        """Alias for the OpenEnv validator."""
-        return self.summary()    
-
+    def grade(self) -> float:
+        """
+        Standard OpenEnv interface returning a float score.
+        The validator calls this to get the final score in [0.0, 1.0].
+        """
+        self._assert_initialised()
+        return self.summary().final_score
     # ------------------------------------------------------------------
     # reset()
     # ------------------------------------------------------------------
