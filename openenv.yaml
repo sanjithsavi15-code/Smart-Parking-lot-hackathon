@@ -70,7 +70,7 @@ tasks:
       An empty lot and 5 standard cars in the queue.
       Park all 5 cars in valid slots to achieve a perfect score.
     max_steps: 10
-    grader: "env.openenv_api.ParkingEnv.grade"
+    grader: "env.tasks.BasicParkGrader"
     grader_description: >
       Returns 1.0 iff all 5 cars are successfully parked and the queue
       is empty at episode end; otherwise proportional to cars parked.
@@ -83,7 +83,7 @@ tasks:
       EV_CHARGING slots.  The agent must route each car to its
       matching slot type to score full marks.
     max_steps: 20
-    grader: "env.openenv_api.ParkingEnv.grade"
+    grader: "env.tasks.EvSortGrader"
     grader_description: >
       Returns 1.0 only if every EV car occupies an EV_CHARGING slot
       and every Standard car occupies a STANDARD slot at episode end.
@@ -97,12 +97,11 @@ tasks:
       cars arrives.  The agent must maximise revenue within 15 steps
       using limited slots, including PREMIUM slots reserved for VIPs.
     max_steps: 15
-    grader: "env.openenv_api.ParkingEnv.grade"
+    grader: "env.tasks.RushHourGrader"
     grader_description: >
       Continuous score = current_revenue / theoretical_max_revenue.
       Rewards efficient use of premium slots and avoidance of illegal
       moves under congested conditions.
-
 # ── runtime ───────────────────────────────────────────────────────────────────
 runtime:
   python: "3.10"
